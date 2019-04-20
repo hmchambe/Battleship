@@ -28,15 +28,20 @@
  #define NUMBER_OF_SHIPS 10
  #define PARENT 0
  #define CHILD 1
+ #define TRUE 1
+ #define FALSE 0
+ #define DEBUG TRUE
+ #define SHOW_STEP_BY_STEP FALSE
 
  void printShipLocations(int *ships);
  void checkShipsForDuplicates(int *ships);
- int pickChildShip();
- int pickParentShip();
+ int pickShip(int guesser);
  void printOcean(char *ocean);
  void initializeOcean(char *ocean, int ships[NUMBER_OF_SHIPS]);
  void shipGuess(char *ocean, int *counter, int guesser); /* guesser == 0 if parent and guesser == 1 for child */
+ void playGame(pid_t pid, char *ocean, long long int *area);
 
+ pid_t otherPlayer;
 
 
 void checkShipsForDuplicates(int *ships)
@@ -52,12 +57,24 @@ void checkShipsForDuplicates(int *ships)
       /* Generate new ship location, if two are equal */
       while(ships[i] == ships[j])
       {
-        if(i < 25) { ships[i] = pickParentShip(); }
-        else{ ships[i] = pickChildShip(); }
+        if(DEBUG)
+        {
+          printf("Found Duplicate\n");
+          printShipLocations(ships);
+          printf("\n\n");
+        }
+        if(i < 5)
+        {
+          ships[i] = pickShip(PARENT);
+        }
+        else
+        {
+          ships[i] = pickShip(CHILD);
+        }
+
       }
     }
   }
-
   /* Sorts ships */
   for (i = 0; i < (10 - 1); ++i)
   {
@@ -91,16 +108,22 @@ void printOcean(char *ocean)
   printf("\n");
 }
 
-int pickChildShip(){return (rand() % 25 + 24);}
-int pickParentShip(){return (rand() % 25);}
+int pickShip(int guesser){
+  int position = rand() % GRID_SIZE;
+  if (guesser == CHILD) position += GRID_SIZE;
+
+  return position;
+}
+
 void printShipLocations(int *ships)
 {
   int i;
+  char buf[50];
   for(i = 0; i < 5; i++)
   {
-    printf("Parent: %d\nChild: %d\n", ships[i], ships[i + (NUMBER_OF_SHIPS / NUMBER_OF_PLAYERS)]);
+    sprintf(buf, "Parent: %d\nChild: %d\nEND OF SHIP LOCATIONS\n", ships[i], ships[i + (NUMBER_OF_SHIPS / NUMBER_OF_PLAYERS)]);
+    write(0, buf, strlen(buf));
   }
-    printf("END OF SHIP LOCATIONS\n");
 }
 
 void initializeOcean(char *ocean, int ships[NUMBER_OF_SHIPS])
@@ -124,36 +147,50 @@ void initializeOcean(char *ocean, int ships[NUMBER_OF_SHIPS])
 /* Guesser is 0 for parent, 1 for child */
 void shipGuess(char *ocean, int *counter, int guesser)
 {
-  int random, i;
-  if(guesser)
-  { /* Parent */
-    random = pickChildShip();
-  }else
-  {
-    random = pickParentShip();
-  }
+  int random;
+  char buf[50];
+  random = pickShip(guesser);
 
   if(ocean[random] == '.')
   { /* If they guess an empty cell */
     ocean[random] = '*';
-    printf("MISS!\n");
+    sprintf(buf, "MISS!\n");
+    write(0, buf, strlen(buf));
   }else if(ocean[random] == 'O')
   { /* If they guess a cell with a ship in it */
     ocean[random] = 'X';
-    counter[0] = counter[0] - 1;
+    *counter = *counter - 1;
+    sprintf(buf, "HIT!\n");
+    write(0, buf, strlen(buf));
+
+    if(*counter <= 0)
+    {
+      if(guesser == PARENT)
+      {
+        sprintf(buf, "Parent Wins!!\n");
+      }else
+      {
+        sprintf(buf, "Child Wins!!\n");
+      }
+      write(0, buf, strlen(buf));
+      printOcean(ocean);
+      kill(otherPlayer, SIGTERM);
+      exit(0);
+    }
 
     if(DEBUG)
     {
-      printf("HIT!\n");
       if(guesser)
       {
-        printf("ChildCounter: %d\n", *counter);
+        sprintf(buf, "Childcounter: %d\n", *counter);
+        write(0, buf, strlen(buf));
       }else
       {
-        printf("ParentCounter: %d\n", *counter);
+        sprintf(buf, "Parentcounter: %d\n", *counter);
+        write(0, buf, strlen(buf));
       }
-
     }
+
   }else if(ocean[random] == 'X' || ocean[random] == '*')
   { /* If they guess a cell where a ship has already been destroyed, guess again */
       shipGuess(ocean, counter, guesser);
@@ -162,18 +199,14 @@ void shipGuess(char *ocean, int *counter, int guesser)
 
 
  int main() {
-   int fd, newfd, i, j;
-   int parentCounter[1];
-   int childCounter[1];
+   int fd, newfd, i;
    pid_t pid;
-   long long int *area;
    char *ocean;
+   long long int *area;
    int ships[NUMBER_OF_SHIPS];
    srand(time(NULL));
 
    ocean = calloc(NLOOPS, sizeof(char));
-   parentCounter[0] = 5;
-   childCounter[0] = 5;
 
    fd = open("/dev/zero", O_RDWR);
    area = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -181,59 +214,64 @@ void shipGuess(char *ocean, int *counter, int guesser)
 
    newfd = open("/dev/zero", O_RDWR);
    ocean = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, newfd, 0);
-
    close(newfd);
 
    /* Ship Locations */
    for(i = 0; i < 5; i++)
    {
-     ships[i] = pickParentShip();
-     ships[i + (NUMBER_OF_SHIPS / NUMBER_OF_PLAYERS)] = pickChildShip();
+     ships[i] = pickShip(PARENT);
+     ships[i + (NUMBER_OF_SHIPS / NUMBER_OF_PLAYERS)] = pickShip(CHILD);
    }
 
-   //printShipLocations(ships);
    checkShipsForDuplicates(ships);
-   printShipLocations(ships);
-   initializeOcean(ocean, ships);
 
+   if(DEBUG)
+   {
+     printShipLocations(ships);
+   }
+
+   initializeOcean(ocean, ships);
    printOcean(ocean);
 
    *area = 0;
 
    pid = fork();
+   playGame(pid, ocean, area);
 
-   if (pid > 0) {
-     /* Parent process */
-     for (i = 0; i < NLOOPS; i += 2) {
-       while (*area != i); /* empty loop */
-       if(*childCounter <= 0 || *parentCounter <= 0)
-       {
-         kill(pid, SIGTERM);
-         kill(getpid(), SIGTERM);
-       }
-       //sleep(2);
-       shipGuess(ocean, parentCounter, PARENT);
-       printOcean(ocean);
-       fflush(stdout);
-       *area += 1;
-     }
-   }
-   else {
-     /* Child process */
-     for (i = 1; i < NLOOPS + 1; i += 2) {
-       while (*area != i); // empty loop
-
-       if(*childCounter <= 0 || *parentCounter <= 0)
-       {
-         kill(getppid(), SIGTERM);
-         kill(pid, SIGTERM);
-       }
-       //sleep(2);
-       shipGuess(ocean, childCounter, CHILD);
-       printOcean(ocean);
-       fflush(stdout);
-       *area += 1;
-     }
-   }
    return 0;
+ }
+
+ void playGame(pid_t pid, char *ocean, long long int *area) {
+   int childCounter = 5;
+   int parentCounter = 5;
+   char buf[50];
+
+   int guesser;
+   int startingIndex;
+   if (pid > 0) {
+     // PARENT
+     otherPlayer = pid;
+     guesser = PARENT;
+     startingIndex = 0;
+   } else {
+     // CHILD
+     otherPlayer = getppid();
+     guesser = CHILD;
+     startingIndex = 1;
+   }
+
+   int i;
+   for (i = startingIndex; i < NLOOPS + startingIndex; i += 2) {
+     while (*area != i); /* if it isn't my turn, wait for my turn */
+
+     if(SHOW_STEP_BY_STEP)
+     {
+       sleep(2);
+     }
+     int *counter = (guesser == PARENT) ? &parentCounter : &childCounter;
+     shipGuess(ocean, counter, guesser);
+     printOcean(ocean);
+     //fflush(stdout);
+     *area += 1;
+   }
  }
