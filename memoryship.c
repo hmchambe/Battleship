@@ -30,7 +30,7 @@
  #define CHILD 1
  #define TRUE 1
  #define FALSE 0
- #define DEBUG TRUE
+ #define DEBUG FALSE
  #define SHOW_STEP_BY_STEP FALSE
 
  void printShipLocations(int *ships);
